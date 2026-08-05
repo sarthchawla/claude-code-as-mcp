@@ -6,9 +6,10 @@ The server is intentionally dependency-free: it speaks MCP JSON-RPC over standar
 
 ## Features
 
-- `claude_run`: delegate a task to Claude Code.
+- `claude_run`: delegate a task to Claude Code, either synchronously or as a managed background job.
 - `claude_review`: run a read-only review of a working directory.
-- `claude_status`: confirm that Claude Code is available to the server.
+- `claude_status`: confirm the CLI is available and inspect background jobs.
+- `claude_result` and `claude_cancel`: retrieve or cancel a background job.
 - Per-invocation model selection through `model`. When omitted, no `--model` flag is sent, so Claude Code uses its normal configured default.
 - Optional review hook after a successful `claude_run` invocation.
 
@@ -39,7 +40,22 @@ CLAUDE_CODE_MCP_REVIEW_AFTER_RUN = "false"
 
 Use the equivalent JSON from [`examples/mcp-server.json`](examples/mcp-server.json) for harnesses that use an `mcpServers` configuration object.
 
-Restart Codex after changing configuration. It will expose `claude_run`, `claude_review`, and `claude_status` as tools.
+Restart Codex after changing configuration. It will expose the MCP tools listed above.
+
+## Background tasks
+
+Set `background: true` on `claude_run` to return immediately with a `jobId`. The server retains the job's output for the lifetime of its MCP process.
+
+```json
+{
+  "prompt": "Investigate the CI regression and prepare a minimal fix.",
+  "background": true
+}
+```
+
+Use `claude_status` with that `job_id` while it runs, `claude_result` when it completes, or `claude_cancel` to terminate it. Cancellation sends `SIGTERM` to the subprocess group and escalates to `SIGKILL` after five seconds when necessary.
+
+Background jobs are intentionally in-memory: restarting the harness or MCP server cancels access to prior job state. This keeps the bridge portable and avoids writing task history into an arbitrary repository.
 
 ## Dynamic model selection
 
