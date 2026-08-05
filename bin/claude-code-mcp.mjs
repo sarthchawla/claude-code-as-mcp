@@ -2,8 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { access, stat } from "node:fs/promises";
-import { constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
 
 const SERVER_NAME = "claude-code-mcp";
@@ -11,6 +10,7 @@ const SERVER_VERSION = "0.2.0";
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const KILL_GRACE_MS = 5_000;
+const CLI_STATUS_TTL_MS = 5_000;
 const PERMISSION_MODES = new Set(["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
 const reviewAfterRun = parseBoolean(process.env.CLAUDE_CODE_MCP_REVIEW_AFTER_RUN);
 const reviewPrompt = process.env.CLAUDE_CODE_MCP_REVIEW_PROMPT || "Review the changes made for the preceding task. Inspect the working tree and report only actionable defects, regressions, security concerns, or missing tests. Do not make changes.";
@@ -18,6 +18,7 @@ const reviewModel = process.env.CLAUDE_CODE_MCP_REVIEW_MODEL;
 const jobs = new Map();
 let nextJobNumber = 1;
 let latestJobId;
+let cliStatusCache;
 
 const tools = [
   tool("claude_run", "Run a Claude Code task. Set background to true to return a job ID immediately; use claude_status, claude_result, and claude_cancel to manage it.", {
@@ -73,17 +74,29 @@ function startJob(args) {
   const job = { id, status: "running", startedAt: new Date().toISOString(), process: undefined, result: undefined, error: undefined, cancelRequested: false };
   jobs.set(id, job);
   latestJobId = id;
-  job.promise = runTask(args, { onProcess: (process) => { job.process = process; } })
-    .then((result) => { job.status = "completed"; job.result = result; job.endedAt = new Date().toISOString(); })
+  job.promise = runTask(args, {
+    isCancelled: () => job.cancelRequested,
+    onProcess: (process) => {
+      job.process = process;
+      if (job.cancelRequested) process.cancel();
+    }
+  })
+    .then((result) => {
+      job.status = job.cancelRequested ? "cancelled" : "completed";
+      if (!job.cancelRequested) job.result = result;
+      job.endedAt = new Date().toISOString();
+    })
     .catch((error) => { job.status = job.cancelRequested ? "cancelled" : "failed"; job.error = error.message || String(error); job.endedAt = new Date().toISOString(); });
   return jobSummary(job);
 }
 
 function getResult(id) {
   const job = getJob(id);
-  if (job.status === "running") throw new Error(`Job ${job.id} is still running. Use claude_status or claude_cancel.`);
-  if (job.status === "failed") throw new Error(`Job ${job.id} failed: ${job.error}`);
-  if (job.status === "cancelled") throw new Error(`Job ${job.id} was cancelled.`);
+  if (job.status !== "completed") {
+    if (job.status === "failed") throw new Error(`Job ${job.id} failed: ${job.error}`);
+    if (job.status === "cancelled") throw new Error(`Job ${job.id} was cancelled.`);
+    throw new Error(`Job ${job.id} is ${job.status}. Results are available only after completion.`);
+  }
   return { ...jobSummary(job), output: job.result };
 }
 
@@ -105,7 +118,8 @@ function getJob(id) {
 function jobSummary(job) { return { jobId: job.id, status: job.status, startedAt: job.startedAt, endedAt: job.endedAt }; }
 
 async function runTask(args, options = {}) {
-  const cwd = await resolveCwd(args.cwd);
+  const cwd = resolveCwd(args.cwd);
+  throwIfCancelled(options);
   const task = await executeClaude({ prompt: args.prompt, cwd, model: args.model, permissionMode: args.permission_mode || "manual", allowedTools: args.allowed_tools, maxBudgetUsd: args.max_budget_usd, timeoutMs: args.timeout_ms, onProcess: options.onProcess });
   const output = { task };
   const shouldReview = args.review_after_run ?? reviewAfterRun;
@@ -114,14 +128,25 @@ async function runTask(args, options = {}) {
 }
 
 async function runReview(args, options = {}) {
-  const cwd = await resolveCwd(args.cwd);
+  const cwd = resolveCwd(args.cwd);
+  throwIfCancelled(options);
   const review = await executeClaude({ prompt: args.prompt || reviewPrompt, cwd, model: args.model, permissionMode: "plan", allowedTools: ["Read", "Glob", "Grep", "Bash(git *)"], timeoutMs: args.timeout_ms, onProcess: options.onProcess });
   return { review };
 }
 
 async function getStatus(jobId) {
-  const cli = await execute("claude", ["--version"], { cwd: process.cwd(), timeoutMs: 10_000 }).promise;
-  return { available: cli.exitCode === 0, version: cli.stdout.trim() || null, error: cli.stderr.trim() || null, jobs: jobId ? [jobSummary(getJob(jobId))] : [...jobs.values()].map(jobSummary) };
+  return { ...(await getCliStatus()), jobs: jobId ? [jobSummary(getJob(jobId))] : [...jobs.values()].map(jobSummary) };
+}
+
+async function getCliStatus() {
+  if (cliStatusCache && Date.now() - cliStatusCache.checkedAt < CLI_STATUS_TTL_MS) return cliStatusCache.value;
+  try {
+    const cli = await execute("claude", ["--version"], { cwd: process.cwd(), timeoutMs: 10_000 }).promise;
+    cliStatusCache = { checkedAt: Date.now(), value: { available: cli.exitCode === 0, version: cli.stdout.trim() || null, error: cli.stderr.trim() || null } };
+  } catch (error) {
+    cliStatusCache = { checkedAt: Date.now(), value: { available: false, version: null, error: error.message || String(error) } };
+  }
+  return cliStatusCache.value;
 }
 
 async function executeClaude({ prompt, cwd, model, permissionMode, allowedTools, maxBudgetUsd, timeoutMs, onProcess }) {
@@ -187,9 +212,9 @@ function validateArguments(name, args) {
   if (args.review_after_run !== undefined && typeof args.review_after_run !== "boolean") throw new Error("review_after_run must be a boolean");
 }
 
-async function resolveCwd(input) {
+function resolveCwd(input) {
   const cwd = path.resolve(input || process.cwd());
-  try { await access(cwd, constants.R_OK | constants.X_OK); if (!(await stat(cwd)).isDirectory()) throw new Error("not a directory"); }
+  try { accessSync(cwd, constants.R_OK | constants.X_OK); if (!statSync(cwd).isDirectory()) throw new Error("not a directory"); }
   catch { throw new Error(`cwd is not an accessible directory: ${cwd}`); }
   return cwd;
 }
@@ -197,6 +222,7 @@ async function resolveCwd(input) {
 function tool(name, description, properties, required = []) { return { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false } }; }
 function stringSchema(description, required = false) { return { type: "string", ...(required ? { minLength: 1 } : {}), description }; }
 function validateOptionalString(args, key) { if (args[key] !== undefined && (typeof args[key] !== "string" || !args[key].trim())) throw new Error(`${key} must be a non-empty string`); }
+function throwIfCancelled(options) { if (options.isCancelled?.()) throw new Error("Task was cancelled before process start"); }
 function parseJsonOrText(value) { try { return JSON.parse(value); } catch { return value.trim(); } }
 function boundedTimeout(value) { return Math.min(Math.max(value || DEFAULT_TIMEOUT_MS, 1), MAX_TIMEOUT_MS); }
 function requireString(value, key) { if (typeof value !== "string" || !value.trim()) throw new Error(`${key} must be a non-empty string`); }

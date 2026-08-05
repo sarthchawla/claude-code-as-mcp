@@ -59,9 +59,10 @@ test("manages a background task and rejects invalid arguments", async () => {
   await assert.rejects(client.call("claude_run", { prompt: "x", unsupported: true }), /Unexpected argument/);
   await assert.rejects(client.call("claude_run", { prompt: "x", permission_mode: "not-a-mode" }), /permission_mode must be one of/);
   await assert.rejects(client.call("claude_run", { prompt: "wait", cwd: process.cwd(), timeout_ms: 10 }), /timed out/);
-  const cancellable = JSON.parse(await client.call("claude_run", { prompt: "forever", cwd: process.cwd(), background: true }));
+  const cancellable = JSON.parse(await client.call("claude_run", { prompt: "slow-cancel", cwd: process.cwd(), background: true }));
   const cancelling = JSON.parse(await client.call("claude_cancel", { job_id: cancellable.jobId }));
   assert.equal(cancelling.status, "cancelling");
+  await assert.rejects(client.call("claude_result", { job_id: cancellable.jobId }), /Results are available only after completion/);
   await waitForAsync(async () => (JSON.parse(await client.call("claude_status", { job_id: cancellable.jobId }))).jobs[0].status === "cancelled");
   client.close();
 });
@@ -72,7 +73,10 @@ async function createFakeClaude() {
   await writeFile(fakeClaude, `#!${process.execPath}
 const args = process.argv.slice(2);
 const output = () => console.log(JSON.stringify({ args }));
-if (args.at(-1) === "wait") setTimeout(output, 500); else if (args.at(-1) === "forever") setInterval(() => {}, 1_000); else output();
+if (args.at(-1) === "wait") setTimeout(output, 500);
+else if (args.at(-1) === "forever") setInterval(() => {}, 1_000);
+else if (args.at(-1) === "slow-cancel") { process.on("SIGTERM", () => setTimeout(() => process.exit(0), 100)); setInterval(() => {}, 1_000); }
+else output();
 `);
   await chmod(fakeClaude, 0o755);
   return fakeBin;
