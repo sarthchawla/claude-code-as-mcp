@@ -1,99 +1,156 @@
 # Claude Code MCP
 
-Use an already-installed, authenticated [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) from Codex or any other MCP-compatible agent harness.
+Use an already-installed and authenticated [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) from Codex or any other MCP-compatible harness.
 
-The server is intentionally dependency-free: it speaks MCP JSON-RPC over standard input/output and invokes the local `claude` command. It does not manage authentication or install Claude Code.
+This is an MCP server, not a host-specific plugin: it communicates over standard input/output and starts the local `claude` executable. That makes its tool interface portable across MCP clients while preserving your existing CLI authentication and default model configuration.
 
-## Features
+## What it provides
 
-- `claude_run`: delegate a task to Claude Code, either synchronously or as a managed background job.
-- `claude_review`: run a read-only review of a working directory.
-- `claude_status`: confirm the CLI is available and inspect background jobs.
-- `claude_result` and `claude_cancel`: retrieve or cancel a background job.
-- Per-invocation model selection through `model`. When omitted, no `--model` flag is sent, so Claude Code uses its normal configured default.
-- Optional review hook after a successful `claude_run` invocation.
+| Tool | Purpose |
+| --- | --- |
+| `claude_run` | Run a task synchronously or as a managed background job. |
+| `claude_review` | Run a read-only review in a working directory. |
+| `claude_status` | Check local CLI availability and background-job status. |
+| `claude_result` | Retrieve a completed background job's stored output. |
+| `claude_cancel` | Cancel a running background job. |
+
+Every task and review accepts an optional `model`. If it is omitted, the server does not send `--model`, so the local CLI uses its normally configured default.
 
 ## Prerequisites
 
-1. Install and authenticate Claude Code.
-2. Install Node.js 18 or newer.
-3. Clone this repository somewhere that the harness can access.
+- Node.js 18 or newer
+- Claude Code already installed and authenticated
+- Codex CLI, if you are using the Codex installation path below
 
-Confirm the prerequisite before configuration:
+Check the local prerequisites:
 
 ```sh
+node --version
 claude --version
+codex --version
 ```
 
-## Codex configuration
+## Install in Codex
 
-Add this MCP server to your Codex configuration and replace `/absolute/path/to/claude-code-as-mcp` with the clone location:
+Clone the repository, or use your existing clone:
 
-```toml
-[mcp_servers.claude-code]
-command = "node"
-args = ["/absolute/path/to/claude-code-as-mcp/bin/claude-code-mcp.mjs"]
-
-[mcp_servers.claude-code.env]
-CLAUDE_CODE_MCP_REVIEW_AFTER_RUN = "false"
+```sh
+git clone https://github.com/sarthchawla/claude-code-as-mcp.git
+cd claude-code-as-mcp
 ```
 
-Use the equivalent JSON from [`examples/mcp-server.json`](examples/mcp-server.json) for harnesses that use an `mcpServers` configuration object.
+Register the server. Run this from the cloned repository so the command records an absolute path:
 
-Restart Codex after changing configuration. It will expose the MCP tools listed above.
+```sh
+MCP_SERVER_PATH="$(pwd)/bin/claude-code-mcp.mjs"
 
-## Background tasks
+codex mcp add claude-code \
+  --env CLAUDE_CODE_MCP_REVIEW_AFTER_RUN=false \
+  -- node "$MCP_SERVER_PATH"
+```
 
-Set `background: true` on `claude_run` to return immediately with a `jobId`. The server retains the job's output for the lifetime of its MCP process.
+Verify registration:
+
+```sh
+codex mcp list
+```
+
+Restart Codex or start a new task. The five tools listed above should then be available.
+
+### Enable the post-task review hook
+
+The hook is disabled by default. To enable it, replace the registration:
+
+```sh
+codex mcp remove claude-code
+
+MCP_SERVER_PATH="$(pwd)/bin/claude-code-mcp.mjs"
+
+codex mcp add claude-code \
+  --env CLAUDE_CODE_MCP_REVIEW_AFTER_RUN=true \
+  -- node "$MCP_SERVER_PATH"
+```
+
+The hook runs only after a successful `claude_run`. It uses a restricted, read-only tool set and returns its findings under `review` in the same tool response. It adds latency and usage, and does not attempt automatic fixes or feedback loops.
+
+For a customized hook, add either optional environment variable during `codex mcp add`:
+
+```sh
+--env 'CLAUDE_CODE_MCP_REVIEW_MODEL=sonnet'
+--env 'CLAUDE_CODE_MCP_REVIEW_PROMPT=Review for correctness, security, and missing tests. Do not modify files.'
+```
+
+## Use from Codex
+
+Ask Codex to use a tool directly. Typical calls look like these:
 
 ```json
 {
-  "prompt": "Investigate the CI regression and prepare a minimal fix.",
-  "background": true
-}
-```
-
-Use `claude_status` with that `job_id` while it runs, `claude_result` when it completes, or `claude_cancel` to terminate it. Cancellation sends `SIGTERM` to the subprocess group and escalates to `SIGKILL` after five seconds when necessary.
-
-Background jobs are intentionally in-memory: restarting the harness or MCP server cancels access to prior job state. This keeps the bridge portable and avoids writing task history into an arbitrary repository.
-
-## Dynamic model selection
-
-Choose a model only for a particular request by passing `model` to either execution tool:
-
-```json
-{
-  "prompt": "Investigate the failing unit test and propose the smallest safe fix.",
+  "prompt": "Investigate the failing tests and make the smallest safe fix.",
+  "cwd": "/absolute/path/to/project",
   "model": "sonnet"
 }
 ```
 
-Omit `model` to use exactly the default that the local Claude Code configuration would use. The MCP server does not supply a fallback model or change Claude Code settings.
-
-## Review hook
-
-Enable the hook by setting this environment variable on the MCP server:
-
-```json
-"CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "true"
-```
-
-After each successful `claude_run`, the server starts a second Claude Code invocation in `plan` mode with a constrained, read-only tool set. Its findings are included under `review` in the same tool result. A caller can override the setting for one invocation with `review_after_run`; `review_model` selects a model only for the review.
-
-Customize the review prompt or default review model with:
+Omit `model` to use the local CLI default:
 
 ```json
 {
-  "CLAUDE_CODE_MCP_REVIEW_PROMPT": "Review this implementation for correctness, security, and missing tests. Do not modify files.",
-  "CLAUDE_CODE_MCP_REVIEW_MODEL": "sonnet"
+  "prompt": "Review the current changes for regressions.",
+  "cwd": "/absolute/path/to/project"
 }
 ```
 
-This hook adds latency and usage to every successful delegated task. It does not attempt to automatically fix findings or run an unbounded feedback loop.
+The default permission mode is `manual`. `claude_run` also supports `permission_mode`, `allowed_tools`, `max_budget_usd`, `timeout_ms`, and `review_after_run` for a single-call hook override.
+
+### Background jobs
+
+Set `background` to `true` to receive a `jobId` immediately:
+
+```json
+{
+  "prompt": "Investigate the CI regression and prepare a minimal fix.",
+  "cwd": "/absolute/path/to/project",
+  "background": true
+}
+```
+
+Then use:
+
+1. `claude_status` with `job_id` while the task runs.
+2. `claude_result` with `job_id` after status is `completed`.
+3. `claude_cancel` with `job_id` to stop it.
+
+Cancellation sends `SIGTERM` to the subprocess group, followed by `SIGKILL` after five seconds if needed. Job state and output are stored only in memory; restarting the MCP server loses prior job history.
+
+## Configure another MCP harness
+
+Use the standard `mcpServers` entry in [`examples/mcp-server.json`](examples/mcp-server.json), replacing the placeholder path with the absolute location of `bin/claude-code-mcp.mjs`:
+
+```json
+{
+  "mcpServers": {
+    "claude-code": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-code-as-mcp/bin/claude-code-mcp.mjs"],
+      "env": {
+        "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false"
+      }
+    }
+  }
+}
+```
+
+## Troubleshooting
+
+- **The server is unavailable:** run `claude --version` in the same terminal environment used to start Codex. The server relies on `claude` being on `PATH`.
+- **The model is not what you expected:** omit `model` to use the CLI default, or supply the desired model alias/value only for that invocation.
+- **A background job disappeared:** jobs are process-local. Re-run the task after restarting Codex or the MCP server.
+- **Update or remove the server:** use `codex mcp remove claude-code`, then run the registration command again (or leave it removed).
 
 ## Security
 
-An MCP client that can call this server can ask Claude Code to operate in the supplied `cwd`. Only register it with trusted local harnesses and repositories. Keep the default `permission_mode` of `manual`, and use more permissive modes only when the caller has an appropriate sandbox.
+Any MCP client that can call this server can ask the local CLI to operate in its supplied `cwd`. Register it only with trusted harnesses and repositories. Keep the default `manual` permission mode unless the calling environment provides a suitable sandbox.
 
 ## Development
 
