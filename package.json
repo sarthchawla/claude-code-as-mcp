@@ -1,0 +1,18 @@
+{
+  "name": "claude-code-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A dependency-free MCP bridge for the local Claude Code CLI.",
+  "type": "module",
+  "bin": {
+    "claude-code-mcp": "bin/claude-code-mcp.mjs"
+  },
+  "scripts": {
+    "start": "node bin/claude-code-mcp.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

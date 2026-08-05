@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "claude-code": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-code-as-mcp/bin/claude-code-mcp.mjs"],
+      "env": {
+        "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false"
+      }
+    }
+  }
+}
