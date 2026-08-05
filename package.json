@@ -1,8 +1,8 @@
 {
-  "name": "claude-code-mcp",
+  "name": "claude-code-as-plugin",
   "version": "0.2.0",
   "private": true,
-  "description": "A dependency-free MCP bridge for the local Claude Code CLI.",
+  "description": "A Codex MCP plugin bridge for the local Claude Code CLI.",
   "type": "module",
   "bin": {
     "claude-code-mcp": "bin/claude-code-mcp.mjs"

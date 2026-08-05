@@ -1,4 +1,4 @@
-# Claude Code MCP
+# Claude Code Plugin for Codex
 
 Use an already-installed and authenticated [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) from Codex or any other MCP-compatible harness.
 
@@ -35,8 +35,8 @@ codex --version
 Clone the repository, or use your existing clone:
 
 ```sh
-git clone https://github.com/sarthchawla/claude-code-as-mcp.git
-cd claude-code-as-mcp
+git clone https://github.com/sarthchawla/claude-code-as-plugin.git
+cd claude-code-as-plugin
 ```
 
 Register the server. Run this from the cloned repository so the command records an absolute path:
@@ -132,7 +132,7 @@ Use the standard `mcpServers` entry in [`examples/mcp-server.json`](examples/mcp
   "mcpServers": {
     "claude-code": {
       "command": "node",
-      "args": ["/absolute/path/to/claude-code-as-mcp/bin/claude-code-mcp.mjs"],
+      "args": ["/absolute/path/to/claude-code-as-plugin/bin/claude-code-mcp.mjs"],
       "env": {
         "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false"
       }
