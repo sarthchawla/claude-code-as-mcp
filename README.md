@@ -1,4 +1,4 @@
-# Claude Code Plugin for Codex
+# Claude Code Plugin for Any Agent
 
 Use an already-installed and authenticated [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) from Codex or any other MCP-compatible harness.
 
