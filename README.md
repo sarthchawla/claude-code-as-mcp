@@ -14,7 +14,7 @@ This is an MCP server, not a host-specific plugin: it communicates over standard
 | `claude_result` | Retrieve a completed background job's stored output. |
 | `claude_cancel` | Cancel a running background job. |
 
-Every task and review accepts an optional `model`. If it is omitted, the server does not send `--model`, so the local CLI uses its normally configured default.
+Every task and review accepts optional `model` and `effort` fields. If `model` is omitted, the server does not send `--model`, so the local CLI uses its normally configured default. `effort` maps directly to Claude Code's `--effort` option (`low`, `medium`, `high`, `xhigh`, or `max`).
 
 ## Prerequisites
 
@@ -96,7 +96,8 @@ Ask Codex to use a tool directly. Typical calls look like these:
 {
   "prompt": "Investigate the failing tests and make the smallest safe fix.",
   "cwd": "/absolute/path/to/project",
-  "model": "sonnet"
+  "model": "sonnet",
+  "effort": "high"
 }
 ```
 
@@ -109,7 +110,7 @@ Omit `model` to use the local CLI default:
 }
 ```
 
-The default permission mode is `manual`. `claude_run` also supports `permission_mode`, `allowed_tools`, `max_budget_usd`, `timeout_ms`, and `review_after_run` for a single-call hook override.
+The default permission mode is `manual`. `claude_run` also supports `permission_mode`, `allowed_tools`, `max_budget_usd`, `timeout_ms`, and `review_after_run` for a single-call hook override. Use `claude_review` with `model: "opus"` and an `effort` value when you want a higher-effort read-only review.
 
 ### Background jobs
 

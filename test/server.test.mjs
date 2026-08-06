@@ -21,7 +21,7 @@ test("advertises Claude tools and accepts initialize", async () => {
   child.kill();
 });
 
-test("passes a model only when a caller explicitly supplies one", async () => {
+test("passes per-invocation model and effort options", async () => {
   const fakeBin = await mkdtemp(path.join(tmpdir(), "claude-code-mcp-"));
   const fakeClaude = path.join(fakeBin, "claude");
   await writeFile(fakeClaude, `#!${process.execPath}
@@ -33,8 +33,12 @@ if (args.at(-1) === "wait") setTimeout(output, 500); else if (args.at(-1) === "f
   const client = createClient({ PATH: `${fakeBin}:${process.env.PATH}` });
   const withoutModel = JSON.parse(await client.call("claude_run", { prompt: "first task", cwd: process.cwd() }));
   assert.equal(withoutModel.task.result.args.includes("--model"), false);
-  const withModel = JSON.parse(await client.call("claude_run", { prompt: "second task", model: "sonnet", cwd: process.cwd() }));
-  assert.deepEqual(withModel.task.result.args.slice(-3), ["--model", "sonnet", "second task"]);
+  const withModel = JSON.parse(await client.call("claude_run", { prompt: "second task", model: "sonnet", effort: "high", cwd: process.cwd() }));
+  assert.deepEqual(withModel.task.result.args.slice(-5), ["--model", "sonnet", "--effort", "high", "second task"]);
+  const review = JSON.parse(await client.call("claude_review", { model: "opus", effort: "max", cwd: process.cwd() }));
+  assert.equal(review.review.result.args[review.review.result.args.indexOf("--model") + 1], "opus");
+  assert.equal(review.review.result.args[review.review.result.args.indexOf("--effort") + 1], "max");
+  await assert.rejects(client.call("claude_review", { effort: "invalid" }), /effort must be one of/);
   client.close();
 });
 
