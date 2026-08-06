@@ -39,14 +39,18 @@ git clone https://github.com/sarthchawla/claude-code-as-plugin.git
 cd claude-code-as-plugin
 ```
 
-Register the server. Run this from the cloned repository so the command records an absolute path:
+Register the server. Run this from the cloned repository. The command records absolute paths for both Node and the local CLI, so it also works when Codex is launched from a desktop app with a minimal `PATH`:
 
 ```sh
 MCP_SERVER_PATH="$(pwd)/bin/claude-code-mcp.mjs"
+MCP_NODE_BIN="$(command -v node)"
+MCP_CLAUDE_BIN="$(dirname "$(command -v claude)")"
+MCP_PATH="$MCP_CLAUDE_BIN:$(dirname "$MCP_NODE_BIN"):$PATH"
 
 codex mcp add claude-code \
   --env CLAUDE_CODE_MCP_REVIEW_AFTER_RUN=false \
-  -- node "$MCP_SERVER_PATH"
+  --env "PATH=$MCP_PATH" \
+  -- "$MCP_NODE_BIN" "$MCP_SERVER_PATH"
 ```
 
 Verify registration:
@@ -55,7 +59,7 @@ Verify registration:
 codex mcp list
 ```
 
-Restart Codex or start a new task. The five tools listed above should then be available.
+Fully restart Codex. The five tools listed above should then be available.
 
 ### Enable the post-task review hook
 
@@ -65,10 +69,14 @@ The hook is disabled by default. To enable it, replace the registration:
 codex mcp remove claude-code
 
 MCP_SERVER_PATH="$(pwd)/bin/claude-code-mcp.mjs"
+MCP_NODE_BIN="$(command -v node)"
+MCP_CLAUDE_BIN="$(dirname "$(command -v claude)")"
+MCP_PATH="$MCP_CLAUDE_BIN:$(dirname "$MCP_NODE_BIN"):$PATH"
 
 codex mcp add claude-code \
   --env CLAUDE_CODE_MCP_REVIEW_AFTER_RUN=true \
-  -- node "$MCP_SERVER_PATH"
+  --env "PATH=$MCP_PATH" \
+  -- "$MCP_NODE_BIN" "$MCP_SERVER_PATH"
 ```
 
 The hook runs only after a successful `claude_run`. It uses a restricted, read-only tool set and returns its findings under `review` in the same tool response. It adds latency and usage, and does not attempt automatic fixes or feedback loops.
@@ -131,10 +139,11 @@ Use the standard `mcpServers` entry in [`examples/mcp-server.json`](examples/mcp
 {
   "mcpServers": {
     "claude-code": {
-      "command": "node",
+      "command": "/absolute/path/to/node",
       "args": ["/absolute/path/to/claude-code-as-plugin/bin/claude-code-mcp.mjs"],
       "env": {
-        "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false"
+        "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false",
+        "PATH": "/directory-containing-claude:/directory-containing-node:/usr/local/bin:/usr/bin:/bin"
       }
     }
   }
@@ -143,7 +152,8 @@ Use the standard `mcpServers` entry in [`examples/mcp-server.json`](examples/mcp
 
 ## Troubleshooting
 
-- **The server is unavailable:** run `claude --version` in the same terminal environment used to start Codex. The server relies on `claude` being on `PATH`.
+- **The tools do not appear:** fully quit and reopen Codex after registration. Existing tasks do not always reload MCP configuration.
+- **The server is unavailable:** rerun the registration commands above. They pass absolute Node and CLI paths to Codex, avoiding desktop-app `PATH` differences.
 - **The model is not what you expected:** omit `model` to use the CLI default, or supply the desired model alias/value only for that invocation.
 - **A background job disappeared:** jobs are process-local. Re-run the task after restarting Codex or the MCP server.
 - **Update or remove the server:** use `codex mcp remove claude-code`, then run the registration command again (or leave it removed).

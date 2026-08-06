@@ -1,10 +1,11 @@
 {
   "mcpServers": {
     "claude-code": {
-      "command": "node",
+      "command": "/absolute/path/to/node",
       "args": ["/absolute/path/to/claude-code-as-plugin/bin/claude-code-mcp.mjs"],
       "env": {
-        "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false"
+        "CLAUDE_CODE_MCP_REVIEW_AFTER_RUN": "false",
+        "PATH": "/directory-containing-claude:/directory-containing-node:/usr/local/bin:/usr/bin:/bin"
       }
     }
   }
